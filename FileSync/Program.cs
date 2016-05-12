@@ -12,10 +12,13 @@ namespace FileSync
         {
             try
             {
-                using (Program p = new Program())
+                if (args.Length == 1)
                 {
-                    p.RunThruFile("fileSync_daily.xml");
-                }  
+                    using (Program p = new Program())
+                    {
+                        p.RunThruFile(args[0]);
+                    }
+                } 
             }
             catch(Exception exc)
             {
@@ -71,6 +74,73 @@ namespace FileSync
             }
         }
 
+        public void MirrorSync(string source, string destination, string fileMatch)
+        {
+            _log.Info("Starting mirror sync...");
+
+            var sourceFiles = GetFileList(source, fileMatch);
+            var destinationFiles = GetFileList(destination);
+            var sourceDirs = GetDirectoryList(source);
+            var destinationDirs = GetDirectoryList(destination);
+            var filesToRemove = destinationFiles.Except(sourceFiles).ToList();
+            var dirsToRemove = destinationDirs.Except(sourceDirs).ToList();
+
+            if (sourceFiles.Count == 0)
+            {
+                _log.Info("Nothing to sync.");
+                return;
+            }
+
+            // delete from server all files that are not present on client
+            foreach (string path in filesToRemove)
+            {
+                DeleteFile(destination + path);
+            }
+
+            // delete from server all dirs that are not present on client
+            foreach (string path in dirsToRemove)
+            {
+                DeleteDirectory(destination + path);
+            }
+
+            // Create destination directories if not exists
+            CheckDirectory(destination);
+            foreach (var path in sourceDirs)
+            {
+                CheckDirectory(destination + path);
+            }
+
+            // now sync all files from source to dest
+            foreach (string path in sourceFiles)
+            {
+                try
+                {
+                    FileInfo sourceFile = new FileInfo(source + path);
+                    FileInfo destinationFile = new FileInfo(destination + path);
+
+                    if (!destinationFile.Exists)
+                    {
+                        _log.Info("Creating new file: " + "\t" + destination + path);
+
+                        sourceFile.CopyTo(destination + path);
+                    }
+                    else if (sourceFile.LastWriteTime > destinationFile.LastWriteTime)
+                    {
+                        _log.Info("Overriding file: " + "\t" + destination + path);
+
+                        sourceFile.CopyTo(destination + path, true);
+                    }
+                }
+                catch (Exception exc)
+                {
+                    _log.Error("Exception while syncing file: " + source + path);
+                    _log.Error(exc.ToString());
+                }
+            }
+
+            _log.Info("Finished mirror sync");
+        }
+
         public List<string> GetFileList(string path, string fileMatch = "*")
         {
             var dirInfo = new DirectoryInfo(path);
@@ -108,86 +178,45 @@ namespace FileSync
             return dirPaths;
         }
 
-
-        public void MirrorSync(string source, string destination, string fileMatch)
+        public void DeleteFile(string path)
         {
-            _log.Info("Starting mirror sync...");
+            _log.Info("Removing file: " + "\t" + path);
 
-            var sourceFiles = GetFileList(source, fileMatch);
-            var destinationFiles = GetFileList(destination);
-            var sourceDirs = GetDirectoryList(source);
-            var destinationDirs = GetDirectoryList(destination);             
-            var filesToRemove = destinationFiles.Except(sourceFiles).ToList();
-            var dirsToRemove = destinationDirs.Except(sourceDirs).ToList();
-
-            if (sourceFiles.Count == 0)
+            try
             {
-                _log.Info("Nothing to sync.");
-                return;
+                File.Delete(path);
             }
-            
-            // delete from server all files that are not present on client
-            foreach (string path in filesToRemove)
+            catch (Exception exc)
             {
-                _log.Info("Removing file: " + "\t" + destination + path);
-
-                File.Delete(destination + path);
+                _log.Error("    Cannot remove file: " + path + " due to exception:");
+                _log.Error("    " + exc.ToString());
             }
-
-            // delete from server all dirs that are not present on client
-            foreach (string path in dirsToRemove)
-            {
-                _log.Info("Removing directory: " + "\t" + destination + path);
-
-                Directory.Delete(destination + path);
-            }
-
-            // create destination dirs if not exists
-            DirectoryInfo dest = new DirectoryInfo(destination);
-            if (!dest.Exists)
-            {
-                _log.Info("Creating directory: " + "\t" + destination);
-                dest.Create();
-            }
-            foreach (var path in sourceDirs)
-            {
-                if (!Directory.Exists(destination + path))
-                {
-                    _log.Info("Creating directory: " + "\t" + destination + path);
-                    Directory.CreateDirectory(destination + path);
-                }
-            }
-
-            // now sync all files from source to dest
-            foreach (string path in sourceFiles)
-            {
-                try
-                {
-                    FileInfo sourceFile = new FileInfo(source + path);
-                    FileInfo destinationFile = new FileInfo(destination + path);
-
-                    if (!destinationFile.Exists)
-                    {
-                        _log.Info("Creating new file: " + "\t" + destination + path);
-
-                        sourceFile.CopyTo(destination + path);
-                    }
-                    else if (sourceFile.LastWriteTime > destinationFile.LastWriteTime)
-                    {
-                        _log.Info("Overriding file: " + "\t" + destination + path);
-
-                        sourceFile.CopyTo(destination + path, true);
-                    }
-                }
-                catch (Exception exc)
-                {
-                    _log.Error("Exception while syncing file: " + source + path);
-                    _log.Error(exc.ToString());
-                }
-            }
-
-            _log.Info("Finished mirror sync");
         }
+
+        public void DeleteDirectory(string path)
+        {
+            _log.Info("Removing directory: " + "\t" + path);
+
+            try
+            {
+                Directory.Delete(path);
+            }
+            catch (Exception exc)
+            {
+                _log.Error("    Cannot remove directory: " + path + " due to exception:");
+                _log.Error("    " + exc.ToString());
+            }
+        }
+
+        public void CheckDirectory(string path)
+        {
+            if (!Directory.Exists(path))
+            {
+                _log.Info("Creating directory: " + "\t" + path);
+                Directory.CreateDirectory(path);
+            }
+        }
+
 
         public void Dispose()
         {
